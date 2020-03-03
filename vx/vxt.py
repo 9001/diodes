@@ -2,6 +2,12 @@
 # coding: utf-8
 from __future__ import print_function, unicode_literals
 
+"""vxt.py: transfer files encoded as dotmatrix patterns"""
+__author__ = "ed <vx@ocv.me>"
+__copyright__ = 2020
+__license__ = "MIT"
+__url__ = "https://github.com/9001/diodes/"
+
 import re
 import os
 import sys
