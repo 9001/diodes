@@ -44,10 +44,10 @@ Supported python versions:
   ironpython 2.7.8 (maybe older ones too)
   jython 2.7.1 (maybe older ones too)
 
-Unsupported:
-  on windows + python <= 3.5: unicode filenames anywhere
-  on windows + jython: unicode filenames as arguments (folders ok)
-  on windows + ironpython: unicode filenames as arguments (folders ok)
+Known issues:
+  on windows + cpython <= 3.5: no unicode filenames at all
+  on windows + jython:         no unicode filenames as arguments (folders ok)
+  on windows + ironpython:     no unicode filenames as arguments (folders ok)
 
 Speed estimates with various arguments (if any):
   vxt on winXP vboxsvga, vxr on linux 4.19 host:      45 kB/s
@@ -618,7 +618,7 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         prog="vxt",
         description="transfer files as dotmatrix patterns",
-        epilog="hints:\n  use -nh if your font is broken (centos 6)\n  use -nf -nb on slow terminals (win10 default)\n\nexample:\n  vxt.py some.file some.folder",
+        epilog="hints:\n  use -nh if your font is broken (centos 6)\n  use -nb -nf on slow terminals (win10 default)\n  use -nb -nf -fc if both of these apply (mac osx)\n\nexample:\n  vxt.py some.file some.folder",
     )
     # fmt: off
     ap.add_argument("-nh", dest="halfs", action="store_false", help="disable half-blocks (50%% speed)",)
@@ -630,7 +630,7 @@ def main():
         ap.add_argument("-nb", dest="b", action="store_false", help="disable background filling")
 
     ap.add_argument("-fc", action="store_true", help="always fill cali fullblocks")
-    ap.add_argument("files", metavar="file", nargs="+", help="files to transmit")
+    ap.add_argument("files", metavar="file", nargs="+", help="files / folders to transmit")
     ar = ap.parse_args()
     # fmt: on
 
