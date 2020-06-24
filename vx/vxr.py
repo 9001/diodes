@@ -79,6 +79,19 @@ warn = logging.warning
 error = logging.error
 
 
+class LoggerDedup(logging.Filter):
+    def __init__(self, *args, **kwargs):
+        super(LoggerDedup, self).__init__(*args, **kwargs)
+        self.prev = None
+
+    def filter(self, record):
+        msg = (record.levelno, record.msg)
+        if self.prev != msg:
+            self.prev = msg
+            return True
+        return False
+
+
 class LoggerFmt(logging.Formatter):
     def format(self, record):
         if record.levelno == logging.DEBUG:
@@ -403,7 +416,11 @@ class VxDecoder(object):
         """
         n = n0 + 1
         iterbuf = iter(buf)
-        pvf = next(iterbuf)
+        try:
+            pvf = next(iterbuf)
+        except (RuntimeError, StopIteration):
+            return None
+
         for vf in iterbuf:
             if vf - pvf > self.ledge:
                 pvf = vf
@@ -425,8 +442,8 @@ class VxDecoder(object):
 
         return None
 
-    def find_halfblock(self, yuv, fbh, y, xt):
-        y = int(y + fbh * 1.5)
+    def find_halfblock(self, yuv, fbh, y0, xt):
+        y = int(y0 + fbh * 1.5)
         debug(f"halfblock search at ({xt},{y})")
 
         row_ptr = y * self.sw + xt
@@ -442,9 +459,8 @@ class VxDecoder(object):
 
         ytd = yt2 - yt1
         # offset from cell-top to middle of halfblock
-        ret = (yt1 - y) / fbh
-        ret -= int(ret)
-        ret = ret * fbh + ytd / 2.0
+        ret = yt1 + ytd / 2.0
+        ret -= int(y0 + 2 * fbh)
         ret = round(ret * 1000) / 1000.0
         info(f"halfblock at x{xt} between y{yt1} and y{yt2} = offset {ret}")
         # lower-halfblock between 92 and 102, offset 15
@@ -767,7 +783,7 @@ class VxMatrix(object):
         else:
             yfull, yhalf = divmod(ny, 2)
             y = yfull * self.bh
-            y += self.ohu if yhalf else self.ohl
+            y += self.ohl if yhalf else self.ohu
 
         luma = self.yuv[int(y)][int(x)]
         return self.thresh < luma, x, y, luma
@@ -902,7 +918,7 @@ class Assembler(object):
             try:
                 cksum = bytes(next(it) for _ in range(16))
                 pos += 16
-            except RuntimeError:
+            except (RuntimeError, StopIteration):
                 return False
 
             fn_len, ate = dec_vle(it)
@@ -913,7 +929,7 @@ class Assembler(object):
             try:
                 fn = bytes(next(it) for _ in range(fn_len))
                 pos += fn_len
-            except RuntimeError:
+            except (RuntimeError, StopIteration):
                 return False
 
             # TODO output directory config
@@ -1002,10 +1018,11 @@ def main():
     )
     lh = logging.StreamHandler(sys.stderr)
     lh.setFormatter(LoggerFmt())
+    lh.addFilter(LoggerDedup())
     logging.root.handlers = [lh]
 
     if WINDOWS:
-        os.system("cls")
+        os.system("")
 
     devs = []
     dev = None
@@ -1150,7 +1167,8 @@ def main():
         cksum2 = binascii.hexlify(cksum2).decode("utf-8")
         bits = bits[ofs + ofs2 * 8 :]
         if cksum != cksum2:
-            warn(f"bad checksum; need {cksum}, got {cksum2}, maybe frame {frameno}")
+            if frameno != 0 or asm.next_frame != 0:
+                warn(f"bad checksum; need {cksum}, got {cksum2}, maybe frame {frameno}")
             continue
 
         if frameno == asm.next_frame:

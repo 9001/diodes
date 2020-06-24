@@ -1007,7 +1007,7 @@ def main():
     signal.signal(signal.SIGINT, sighandler)
 
     if WINDOWS:
-        os.system("cls")
+        os.system("")
 
     debug(f"filesystem is {FS_ENC}")
     assert_deps()
