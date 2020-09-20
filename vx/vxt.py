@@ -337,7 +337,7 @@ else:
 
 
 class Vxt(object):
-    def __init__(self, ar, files):
+    def __init__(self, ar, files, out_dir):
         """
         need list of figments (thx kurisu) that have appeared in frames;
         fields for headers:
@@ -367,6 +367,7 @@ class Vxt(object):
         """
         self.ar = ar
         self.files = files
+        self.out_dir = out_dir
         self.frames = []
         self.figs = []
 
@@ -375,7 +376,8 @@ class Vxt(object):
             header = self.gen_header(fo, True)
             fo["len"] = len(header)
             self.figs.append(fo)
-            self.figs.append({"len": fo["sz"], "pl": True})
+            self.figs.append({"len": fo["sz"], "pl": True, "fo": fo})
+            # fo:fo ensures payload figs are unique (figs.index breaks otherwise)
 
         # import pprint; pprint.pprint(self.figs); return
 
@@ -383,16 +385,54 @@ class Vxt(object):
         nbytes = sum(x["sz"] for x in self.files)
         self.header0 = enc_vle(1) + enc_vle(nfiles) + enc_vle(nbytes)
 
-        self.w, self.h = termsize()
+        if self.out_dir:
+            self.out_dir, w, h = self.out_dir.rsplit(",", 2)
+            self.w = int(w)
+            self.h = int(h)
+            try:
+                os.mkdir(self.out_dir)
+            except:
+                pass
+        else:
+            self.w, self.h = termsize()
+
         self.nbits = self.w * self.h - 1
         if self.ar.halfs:
             self.nbits *= 2
 
-    def draw(self, scr, is_cali=False):
+    def draw(self, scr, frameno):
+        if self.out_dir:
+            h = self.h
+            if self.ar.halfs:
+                h *= 2
+
+            bits = "YUV4MPEG2 W{} H{}\n".format(self.w, h).encode("utf-8")
+            lo = struct.pack("B", 0)
+            hi = struct.pack("B", 255)
+            for ln in scr:
+                for ch in ln:
+                    bits += hi if ch in ["█", "▀"] else lo
+
+                if len(ln) < self.w:
+                    bits += lo
+
+                if self.ar.halfs:
+                    for ch in ln:
+                        bits += hi if ch in ["█", "▄"] else lo
+
+                    if len(ln) < self.w:
+                        bits += lo
+
+            fn = os.path.join(self.out_dir, str(frameno + 1) + ".y4m")
+            with open(fn, "wb") as f:
+                f.write(bits)
+
+            return
+
         if self.ar.b:
             scr = fillbg(scr)
 
-        if self.ar.f or (is_cali and self.ar.fc):
+        if self.ar.f or (frameno < 0 and self.ar.fc):
             scr = boxes2bg(scr)
 
         wprint("".join(scr))
@@ -435,7 +475,8 @@ class Vxt(object):
 
     def get_frame_info(self, nframe):
         if nframe > 0 and nframe > len(self.frames) - 1:
-            self.get_frame_info(nframe - 1)
+            if self.get_frame_info(nframe - 1) is None:
+                raise Exception("wha")
 
         if len(self.frames) > nframe:
             return self.frames[nframe]
@@ -529,22 +570,9 @@ class Vxt(object):
 
     def rasterize(self, frameno):
         y_mul = 2 if self.ar.halfs else 1
-        if True:
-            # the real pattern
-            bits = self.gen_frame(frameno)
-        else:
-            # test pattern 1
-            bits = [True, False] * (self.w * 2)
-            bits += [False] * (self.w * ((self.h * y_mul) - 8))
-            bits += ([False, True] * (self.w * 2))[:-y_mul]
-
-            # test pattern 2
-            bits = b"hello world "
-            bits = bits * int((8 + self.nbits / len(bits)) / 8)
-            bits = bstr2bits(bits)[: self.nbits]
-
+        bits = self.gen_frame(frameno)
         if not bits:
-            return ""
+            return []
 
         # all rows except last fills entire screen width;
         # last row leaves a blank cell at the end,
@@ -559,29 +587,45 @@ class Vxt(object):
         while rows and not rows[-1]:
             rows.pop()
 
-        scr = ""
+        scr = []
         if not self.ar.halfs:
             for row in rows:
-                scr += "".join(["█" if x else " " for x in row])
+                scr.append("".join(["█" if x else " " for x in row]))
         else:
             for r1, r2 in zip(rows[::2], rows[1::2]):
+                ln = ""
                 for v1, v2 in zip(r1, r2):
                     if v1 and v2:
-                        scr += "█"
+                        ln += "█"
                     elif v1:
-                        scr += "▀"
+                        ln += "▀"
                     elif v2:
-                        scr += "▄"
+                        ln += "▄"
                     else:
-                        scr += " "
+                        ln += " "
+
+                scr.append(ln)
 
         return scr
 
     def run(self):
         scr = calibration_boxes(self.w, self.h, self.ar.halfs)
-        self.draw(scr, True)
+        self.draw(scr, -1)
 
         cur_frame = -1
+        if self.out_dir:
+            prev = None
+            while True:
+                cur_frame += 1
+                scr = self.rasterize(cur_frame)
+                if scr in [prev, []]:
+                    break
+
+                print("frame", cur_frame)
+                self.draw(scr, cur_frame)
+                prev = scr
+            return
+
         pend = [-1, None]
         while True:
             k = getch()
@@ -606,7 +650,7 @@ class Vxt(object):
                 cur_frame -= 1
                 continue
 
-            self.draw(scr)
+            self.draw(scr, cur_frame)
 
             # rasterize the next frame and stash it for later
             if k == "d":
@@ -630,7 +674,8 @@ def main():
         ap.add_argument("-nb", dest="b", action="store_false", help="disable background filling")
 
     ap.add_argument("-fc", action="store_true", help="always fill cali fullblocks")
-    ap.add_argument("files", metavar="file", nargs="+", help="files / folders to transmit")
+    ap.add_argument("-o", metavar="FOLDER,W,H", help="encode to pics in FOLDER instead of interactive ascii")
+    ap.add_argument("files", metavar="FILE", nargs="+", help="files / folders to transmit")
     ar = ap.parse_args()
     # fmt: on
 
@@ -673,7 +718,7 @@ def main():
         else:
             input()  # nosec: B322
 
-    Vxt(ar, files).run()
+    Vxt(ar, files, ar.o).run()
 
 
 if __name__ == "__main__":
@@ -693,3 +738,12 @@ if __name__ == "__main__":
 # "c:\Program Files\Java\jre1.8.0_241\bin\java.exe" -jar c:\users\ed\bin\jython-standalone-2.7.1.jar vxt.py c:\windows\notepad.exe
 # C:\Users\ed\bin\jdk-13.0.1\bin\java.exe -jar c:\users\ed\bin\jython-standalone-2.7.1.jar vxt.py c:\windows\notepad.exe "c:\users\ed\moon"
 # "c:\Program Files\IronPython 2.7\ipy.exe" vxt.py c:\windows\notepad.exe "c:\users\ed\moon"
+#
+# testgen
+# p=aaaaa; rm -rf tf i.$p; mkdir tf; for a in {a..z}; do echo $a; for b in {a..z}; do for c in {a..z}; do echo -n $p > "tf/z$a$b$c"; done; done; done; ./vxt.py -o i.$p,80,25 tf; ./vxr.py -i i.$p
+#
+# display y4m image
+# xxd -g1 0.y4m | awk '{sub(/[^ ]+ /,"");sub(/  .*/," ");gsub(/ff /,"█");gsub(/00 /,"_");gsub(/[0-9a-f]{2} /,"");printf "%s",$0} END {print "$"}'
+#
+# shrink vxt (for kxt and such):
+# awk 'NR>3&&/^ *# /{next} {sub(/  # .*/,"")} /^ *""".*"""$/{next} /^"""$/||(/ """$/&&(def||blk)) {blk=!blk;def=0;next} !blk; {def=0} /\):$/{def=1}' <vxt.py | unexpand -t 4 --first-only >vxt.smol.py && git diff --no-index --word-diff=color -wU2 vxt.py vxt.smol.py | cat

@@ -230,27 +230,27 @@ class FFmpeg(threading.Thread):
             "-fflags", "+nobuffer",
             "-flags", "+low_delay"
         ]
-        
+
         if LINUX:
             # defaults to 640x480 but prints max size if exceed
             src = ":0.0"
             if x is not None:
                 src = f":0.0+{x},{y}"
-            
+
             if w is None:
                 debug("getting display size")
                 self.w, self.h = get_x11_bounds()
                 if x is not None:
                     self.w -= x
                     self.h -= y
-            
+
             self.cmd.extend([
                 "-f", "x11grab",
                 "-show_region", "1" if show_region else "0",
                 "-framerate", f"{fps}",
                 "-s", f"{self.w}x{self.h}"
             ])
-            
+
             self.cmd.extend(["-i", src])
 
         elif MACOS:
@@ -262,12 +262,12 @@ class FFmpeg(threading.Thread):
                 "-i", f"{dev}:none",
                 "-r", f"{fps}"
             ])
-            
+
             if w is not None:
                 self.cmd.extend([
                     "-vf", f"crop={w}:{h}:{x}:{y}"
                 ])
-        
+
         elif WINDOWS:
             # defaults to fullscreen, idk how multihead works
             self.cmd.extend([
@@ -291,9 +291,9 @@ class FFmpeg(threading.Thread):
 
         self.cmd.extend([
             "-pix_fmt", "gray",
-            #"-vf", "mpdecimate=hi=32",
-            #"-vcodec", "rawvideo",
-            #"-vf", "hqdn3d=16:0",
+            # "-vf", "mpdecimate=hi=32",
+            # "-vcodec", "rawvideo",
+            # "-vf", "hqdn3d=16:0",
             "-f", "yuv4mpegpipe",
             "-",
         ])
@@ -493,7 +493,7 @@ class VxDecoder(object):
         """
         takes an 8-byte grayscale bitmap,
         finds the biggest vx calibration screen
-        
+
         LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL
         L█████████████████████████████████████████████████████████L
         L█LLL█LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL█LLL█L
@@ -998,16 +998,88 @@ class Assembler(object):
         return False
 
 
-def switch_frame(next_frame, automatic, hit_enter):
-    if not automatic:
-        warn(f"please switch to frame {next_frame}")
-    else:
-        kbd = KbdController()
-        kbd.press("d")
-        kbd.release("d")
-        if hit_enter:
-            kbd.press(KbdKey.enter)
-            kbd.release(KbdKey.enter)
+class ScreenSrc(object):
+    def __init__(self, dev, show_region, automatic, hit_enter):
+        self.dev = dev
+        self.show_region = show_region
+        self.automatic = automatic
+        self.hit_enter = hit_enter
+
+        self.ffmpeg = None
+
+    def switch_frame(self, next_frame):
+        if not self.automatic:
+            warn(f"please switch to frame {next_frame + 1}")
+        else:
+            kbd = KbdController()
+            kbd.press("d")
+            kbd.release("d")
+            if self.hit_enter:
+                kbd.press(KbdKey.enter)
+                kbd.release(KbdKey.enter)
+
+    def get_cali(self):
+        ffmpeg = FFmpeg(cali_fps, dev=self.dev, show_region=self.show_region)
+        ffmpeg.start()
+
+        matrix = None
+        pyuv = None
+        while not matrix:
+            while True:
+                time.sleep(cali_wait)
+                yuv = ffmpeg.take_yuv()
+                if yuv:
+                    break
+
+            if pyuv == yuv:
+                continue
+
+            pyuv = yuv
+            t0 = time.time()
+            vxdec = VxDecoder(ffmpeg.w, ffmpeg.h)
+            matrix, sx, sy = vxdec.find_cali(yuv)
+            t = time.time()
+            debug("spent {:.2f} sec".format(t - t0))
+
+        ffmpeg.terminate()
+
+        sw = len(matrix.yuv[0])
+        sh = len(matrix.yuv)
+
+        self.ffmpeg = FFmpeg(dec_fps, sw, sh, sx, sy, self.dev, self.show_region)
+        self.ffmpeg.start()
+
+        return matrix
+
+    def get_yuv(self):
+        return self.ffmpeg.take_yuv()
+
+
+class FolderSrc(object):
+    def __init__(self, src_dir):
+        self.src_dir = src_dir
+        self.nframe = 0
+
+    def switch_frame(self, next_frame):
+        self.nframe = next_frame + 1
+
+    def _read(self):
+        fn = os.path.join(self.src_dir, str(self.nframe) + ".y4m")
+        with open(fn, "rb") as f:
+            buf = f.read()
+
+        header, yuv = buf.split(b"\n", 1)
+        _, w, h = header.decode("utf-8").split(" ")
+        return int(w[1:]), int(h[1:]), yuv
+
+    def get_cali(self):
+        w, h, yuv = self._read()
+        vxdec = VxDecoder(w, h)
+        matrix, sx, sy = vxdec.find_cali(yuv)
+        return matrix
+
+    def get_yuv(self):
+        return self._read()[2]
 
 
 def main():
@@ -1044,8 +1116,11 @@ def main():
     elif len(devs) > 1:
         need_dev = True
 
+    m = "use folder of images instead of screen-capture"
     if MACOS:
-        ap.add_argument("-i", metavar="SCREEN", help="video device (ID or name)")
+        m += ", or specify video device (ID or name)"
+
+    ap.add_argument("-i", metavar="SOURCE", help=m)
 
     if HAVE_PYNPUT:
         ap.add_argument("-nk", action="store_true", help="disable keyboard simulation")
@@ -1057,17 +1132,28 @@ def main():
 
     ar = ap.parse_args()
 
-    if need_dev and ar.i is not None:
-        dev = next((x for x in devs if x[0] == ar.i), None)
+    src_dir = None
+    src_screen = None
+    if ar.i is not None:
+        if os.path.exists(ar.i):
+            src_dir = ar.i
+        elif not MACOS:
+            error("the -i folder does not exist")
+            sys.exit(1)
+        else:
+            src_screen = ar.i
+
+    if need_dev and src_screen is not None:
+        dev = next((x for x in devs if x[0] == src_screen), None)
         if not dev:
-            next((x for x in devs if ar.i in x[1]), None)
+            next((x for x in devs if src_screen in x[1]), None)
         if not dev:
             error("none of the available screens match the one you specified ;_;")
         if dev:
             debug(f"using screen #{dev[0]} = {dev[1]}")
             dev = dev[0]
 
-    if need_dev and dev is None:
+    if need_dev and dev is None and not src_dir:
         error("found multiple screens; you must choose one to record from.")
         error('use "-i <ID/Name>" to choose one of these:')
         for di, dt in devs:
@@ -1084,45 +1170,25 @@ def main():
         ar.ret = False
 
     show_region = not WINDOWS or not use_pynput
-    ffmpeg = FFmpeg(cali_fps, dev=dev, show_region=show_region)
-    ffmpeg.start()
+    if src_dir is None:
+        framesrc = ScreenSrc(dev, show_region, use_pynput, ar.ret)
+        wait = dec_wait
+    else:
+        framesrc = FolderSrc(src_dir)
+        wait = 0
 
-    matrix = None
-    pyuv = None
-    while not matrix:
-        while True:
-            time.sleep(cali_wait)
-            yuv = ffmpeg.take_yuv()
-            if yuv:
-                break
-
-        if pyuv == yuv:
-            continue
-
-        pyuv = yuv
-        t0 = time.time()
-        vxdec = VxDecoder(ffmpeg.w, ffmpeg.h)
-        matrix, sx, sy = vxdec.find_cali(yuv)
-        t = time.time()
-        debug("spent {:.2f} sec".format(t - t0))
-
-    ffmpeg.terminate()
-
+    matrix = framesrc.get_cali()
     sw = len(matrix.yuv[0])
     sh = len(matrix.yuv)
-
-    ffmpeg = FFmpeg(dec_fps, sw, sh, sx, sy, dev, show_region)
-    ffmpeg.start()
-
-    switch_frame(1, use_pynput, ar.ret)
+    framesrc.switch_frame(0)
 
     t0_xfer = time.time()
     asm = Assembler()
     pyuv = None
     while True:
         while True:
-            time.sleep(dec_wait)
-            yuv = ffmpeg.take_yuv()
+            time.sleep(wait)
+            yuv = framesrc.get_yuv()
             if yuv:
                 break
 
@@ -1178,7 +1244,7 @@ def main():
             info(f"got frame {frameno}, need {need}, please go {need-frameno:+d}")
             continue
 
-        switch_frame(asm.next_frame + 1, use_pynput, ar.ret)
+        framesrc.switch_frame(asm.next_frame + 1)
 
         now = time.time()
         td_xfer = now - t0_xfer
