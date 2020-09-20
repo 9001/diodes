@@ -147,6 +147,15 @@ def bstr2bits(buf):
     return [x == "1" for x in bstr2bitstr(buf)]
 
 
+def nextrange(it, n):
+    ret = bytes(next(it) for _ in range(n))
+    if len(ret) != n:
+        # TODO next() sometimes doesn't raise this, why
+        raise StopIteration()
+
+    return ret
+
+
 def get_avfoundation_devs():
     rhdr = re.compile(r"^\[AVFoundation input device @ 0x[0-9a-f]+\] (.*)")
     rcat = re.compile(r"^AVFoundation ([^ ]*)")
@@ -916,7 +925,7 @@ class Assembler(object):
                 return False
 
             try:
-                cksum = bytes(next(it) for _ in range(16))
+                cksum = nextrange(it, 16)
                 pos += 16
             except (RuntimeError, StopIteration):
                 return False
@@ -927,13 +936,19 @@ class Assembler(object):
                 return False
 
             try:
-                fn = bytes(next(it) for _ in range(fn_len))
+                fn = nextrange(it, fn_len)
                 pos += fn_len
             except (RuntimeError, StopIteration):
                 return False
 
             # TODO output directory config
             fn = b"inc/" + fn
+
+            hfn = fn.decode("utf-8", "ignore")
+            hsum = binascii.hexlify(cksum).decode("utf-8")
+            info("")
+            info(f"receiving file: {sz} bytes, {ts} lastmod, {hsum},\n  |{fn_len}| {hfn}")
+
             os.makedirs(fn.rsplit(b"/", 1)[0], exist_ok=True)
 
             self.buf = self.buf[pos:]
@@ -944,11 +959,6 @@ class Assembler(object):
                 "cksum": cksum,
                 "fo": open(fn, "wb"),
             }
-
-            hfn = fn.decode("utf-8", "ignore")
-            hsum = binascii.hexlify(cksum).decode("utf-8")
-            info("")
-            info(f"receiving file: {sz} bytes, {ts} lastmod, {hsum},\n  {hfn}")
 
             self.fig_no += 1
             return True
