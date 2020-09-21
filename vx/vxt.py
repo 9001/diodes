@@ -410,16 +410,12 @@ class Vxt(object):
             lo = struct.pack("B", 0)
             hi = struct.pack("B", 255)
             for ln in scr:
-                for ch in ln:
-                    bits += hi if ch in ["█", "▀"] else lo
-
+                bits += b"".join([hi if ch in ["█", "▀"] else lo for ch in ln])
                 if len(ln) < self.w:
                     bits += lo
 
                 if self.ar.halfs:
-                    for ch in ln:
-                        bits += hi if ch in ["█", "▄"] else lo
-
+                    bits += b"".join([hi if ch in ["█", "▄"] else lo for ch in ln])
                     if len(ln) < self.w:
                         bits += lo
 

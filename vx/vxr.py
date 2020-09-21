@@ -785,6 +785,15 @@ class VxMatrix(object):
     def set_yuv(self, yuv):
         self.yuv = yuv
 
+    def read(self):
+        return "".join(
+            [
+                "1" if self.get(x, y)[0] else "0"
+                for y in range(self.height())
+                for x in range(self.width(y))
+            ]
+        )
+
     def get(self, nx, ny):
         x = self.ox + self.bw * nx
         if not self.halfs or self.ohl is None or self.ohu is None:
@@ -947,7 +956,7 @@ class Assembler(object):
             hfn = fn.decode("utf-8", "ignore")
             hsum = binascii.hexlify(cksum).decode("utf-8")
             info("")
-            info(f"receiving file: {sz} bytes, {ts} lastmod, {hsum},\n  |{fn_len}| {hfn}")
+            info(f"receiving file: {sz} bytes, {ts} lastmod, {hsum},\n|{fn_len}| {hfn}")
 
             os.makedirs(fn.rsplit(b"/", 1)[0], exist_ok=True)
 
@@ -1214,25 +1223,7 @@ def main():
         pyuv = yuv
         syuv = [yuv[sw * n : sw * (n + 1)] for n in range(sh)]
         matrix.set_yuv(syuv)
-        bits = ""
-        cx = 0
-        cy = 0
-        dbuf = b""
-        vis = []
-        while True:
-            sv, sx, sy, sl = matrix.get(cx, cy)
-            bits += "1" if sv else "0"
-            # if len(bits) >= 8 and len(bits) % 8 == 0:
-            #    vis.append("".join(["@" if x == "1" else " " for x in bits[-8:]]))
-
-            cx += 1
-            if cx >= matrix.width(cy):
-                cx = 0
-                cy += 1
-                if vis:
-                    vis.append("/")
-                if cy >= matrix.height():
-                    break
+        bits = matrix.read()
 
         ofs = 4 * 8
         cksum = bits2bstr(bits[:ofs])
@@ -1276,8 +1267,6 @@ def main():
             )
             debug(dbuf.decode("latin1", "replace"))
             # debug(" ".join(str(int(x)) for x in dbuf))
-            if vis:
-                print("".join(vis))
 
         if asm.bytes_total is not None:
             perc_bytes = 100.0 * asm.bytes_done / asm.bytes_total
