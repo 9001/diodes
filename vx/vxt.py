@@ -742,4 +742,4 @@ if __name__ == "__main__":
 # xxd -g1 0.y4m | awk '{sub(/[^ ]+ /,"");sub(/  .*/," ");gsub(/ff /,"█");gsub(/00 /,"_");gsub(/[0-9a-f]{2} /,"");printf "%s",$0} END {print "$"}'
 #
 # shrink vxt (for kxt and such):
-# awk 'NR>3&&/^ *# /{next} {sub(/  # .*/,"")} /^ *""".*"""$/{next} /^"""$/||(/ """$/&&(def||blk)) {blk=!blk;def=0;next} !blk; {def=0} /\):$/{def=1}' <vxt.py | unexpand -t 4 --first-only >vxt.smol.py && git diff --no-index --word-diff=color -wU2 vxt.py vxt.smol.py | cat
+# awk 'NR>3&&/^ *# /{next} {sub(/  # .*/,"")} /^ *""".*"""$/{next} /^"""$/||(/ """$/&&(def||blk)) {blk=!blk;def=0;next} !blk; {def=0} /\):$/{def=1}' <vxt.py | $(command -v {g,}unexpand | head -n 1) -t 4 --first-only >vxt.smol.py && git diff --no-index --word-diff=color -wU2 vxt.py vxt.smol.py | cat

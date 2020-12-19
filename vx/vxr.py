@@ -157,7 +157,7 @@ def nextrange(it, n):
 
 
 def get_avfoundation_devs():
-    rhdr = re.compile(r"^\[AVFoundation input device @ 0x[0-9a-f]+\] (.*)")
+    rhdr = re.compile(r"^\[AVFoundation (input device|indev) @ 0x[0-9a-f]+\] (.*)")
     rcat = re.compile(r"^AVFoundation ([^ ]*)")
     rdev = re.compile(r"^\[([0-9]+)\] (.*)")
     ret = []
@@ -174,11 +174,12 @@ def get_avfoundation_devs():
     _, txt = sp.Popen(cmd, stderr=sp.PIPE).communicate()
     for ln in txt.split(b"\n"):
         ln = ln.decode("utf-8", "ignore").strip()
+        debug("ffmpeg: \033[0;36m{}".format(ln))
         m = rhdr.match(ln)
         if not m:
             continue
 
-        ln = m.group(1)
+        ln = m.group(2)
         m = rcat.match(ln)
         if m:
             in_video = m.group(1) == "video"
@@ -1045,6 +1046,9 @@ class ScreenSrc(object):
         pyuv = None
         while not matrix:
             while True:
+                if not ffmpeg.is_alive():
+                    raise Exception("FFmpeg exited while scanning for calibration pattern")
+                
                 time.sleep(cali_wait)
                 yuv = ffmpeg.take_yuv()
                 if yuv:
@@ -1103,7 +1107,7 @@ class FolderSrc(object):
 
 def main():
     logging.basicConfig(
-        level=logging.INFO,  # INFO DEBUG
+        level=logging.DEBUG if "-d" in sys.argv else logging.INFO,
         format="\033[36m%(asctime)s.%(msecs)03d\033[0m %(message)s",
         datefmt="%H%M%S",
     )
@@ -1122,13 +1126,15 @@ def main():
         debug("collecting video device list")
         devs = get_avfoundation_devs()
         debug(f"found {len(devs)} devices")
-        # devs.append([4, "asdf fdsa"])
+        if not devs:
+            raise Exception("could not detect any avfoundation devices to capture video from")
 
     ap = argparse.ArgumentParser(
         formatter_class=argparse.RawDescriptionHelpFormatter,
         prog="vxr",
         description="receive files by recording a dotmatrix pattern",
     )
+    ap.add_argument("-d", action="store_true", help="show debug messages")
 
     if len(devs) == 1:
         dev = devs[0][0]
@@ -1165,7 +1171,7 @@ def main():
     if need_dev and src_screen is not None:
         dev = next((x for x in devs if x[0] == src_screen), None)
         if not dev:
-            next((x for x in devs if src_screen in x[1]), None)
+            dev = next((x for x in devs if src_screen in x[1]), None)
         if not dev:
             error("none of the available screens match the one you specified ;_;")
         if dev:
