@@ -1,0 +1,82 @@
+{
+  "a": {
+    "mod_scheme": "ook",
+    "checksum_scheme": "none",
+    "inner_fec_scheme": "none",
+    "outer_fec_scheme": "none",
+    "frame_length": 50,
+    "modulation": {
+      "center_frequency": 2000,
+      "gain": 0.15
+    },
+    "interpolation": {
+      "shape": "kaiser",
+      "samples_per_symbol": 10,
+      "symbol_delay": 4,
+      "excess_bandwidth": 0.35
+    },
+    "encoder_filters": {
+      "dc_filter_alpha": 0.01
+    },
+    "resampler": {
+      "delay": 13,
+      "bandwidth": 0.45,
+      "attenuation": 60,
+      "filter_bank_size": 64
+    }
+  },
+  "cable-64k": {
+    "mod_scheme": "qam1024",
+    "checksum_scheme": "crc32",
+    "inner_fec_scheme": "v27p23",
+    "outer_fec_scheme": "rs8",
+    "frame_length": 7500,
+    "modulation": {
+      "center_frequency": 10200,
+      "gain": 0.09
+    },
+    "interpolation": {
+      "shape": "kaiser",
+      "samples_per_symbol": 2,
+      "symbol_delay": 4,
+      "excess_bandwidth": 0.35
+    },
+    "encoder_filters": {
+      "dc_filter_alpha": 0.03
+    },
+    "ofdm": {
+      "num_subcarriers": 128,
+      "cyclic_prefix_length": 16,
+      "taper_length": 8,
+      "left_band": 6,
+      "right_band": 12
+    }
+  },
+  "w": {
+    "mod_scheme": "qam1024",
+    "checksum_scheme": "crc32",
+    "inner_fec_scheme": "none",
+    "outer_fec_scheme": "rs8",
+    "frame_length": 8000,
+    "modulation": {
+      "center_frequency": 10200,
+      "gain": 0.15
+    },
+    "interpolation": {
+      "shape": "kaiser",
+      "samples_per_symbol": 2,
+      "symbol_delay": 4,
+      "excess_bandwidth": 0.28
+    },
+    "encoder_filters": {
+      "dc_filter_alpha": 0.03
+    },
+    "ofdm": {
+      "num_subcarriers": 320,
+      "cyclic_prefix_length": 16,
+      "taper_length": 8,
+      "left_band": 6,
+      "right_band": 12
+    }
+  }
+}
